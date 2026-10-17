@@ -1,0 +1,21 @@
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Logs and screenshots
+logs/
+*.log
+*.png
+
+# Browser session data
+chrome-profile/
+**/chrome-profile/
+
+# Local resume and personal data
+resume/

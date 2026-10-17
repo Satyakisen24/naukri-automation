@@ -1,0 +1,78 @@
+
+pipeline {
+    agent any
+
+    triggers {
+        // Run daily at exactly 9:00 AM
+        cron('0 9 * * *')
+    }
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    stages {
+
+        stage('Check Python') {
+            steps {
+                bat '''
+                    cd /d D:\\naukri-automation
+                    py -3 --version
+                '''
+            }
+        }
+
+        stage('Check Project Files') {
+            steps {
+                bat '''
+                    cd /d D:\\naukri-automation
+
+                    if not exist config.json exit /b 1
+
+                    if not exist scripts\\update_naukri.py exit /b 1
+
+                    if not exist resume\\resume_latest.pdf (
+                        echo ERROR: Resume file is missing
+                        exit /b 2
+                    )
+                '''
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                bat '''
+                    cd /d D:\\naukri-automation
+                    py -3 -m pip install -r requirements.txt
+                '''
+            }
+        }
+
+        stage('Run Naukri Automation') {
+            steps {
+                bat '''
+                    cd /d D:\\naukri-automation
+                    py -3 scripts\\update_naukri.py
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts(
+                artifacts: 'logs/**',
+                allowEmptyArchive: true
+            )
+        }
+
+        success {
+            echo 'Profile inspection completed.'
+        }
+
+        failure {
+            echo 'Automation failed. Check Console Output and logs.'
+        }
+    }
+}
