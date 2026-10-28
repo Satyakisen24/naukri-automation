@@ -2,18 +2,16 @@
 pipeline {
     agent any
 
-    triggers {
-        // Run daily at exactly 9:00 AM
-        cron('0 9 * * *')
-    }
-
     options {
         timestamps()
         disableConcurrentBuilds()
     }
 
-    stages {
+    triggers {
+        cron('0 9 * * *')
+    }
 
+    stages {
         stage('Check Python') {
             steps {
                 bat '''
@@ -29,13 +27,10 @@ pipeline {
                     cd /d D:\\naukri-automation
 
                     if not exist config.json exit /b 1
-
                     if not exist scripts\\update_naukri.py exit /b 1
-
-                    if not exist resume\\resume_latest.pdf (
-                        echo ERROR: Resume file is missing
-                        exit /b 2
-                    )
+                    if not exist requirements.txt exit /b 1
+                    if not exist resume\\Satyaki_resume.pdf exit /b 1
+                    if not exist chrome-profile mkdir chrome-profile
                 '''
             }
         }
@@ -49,11 +44,12 @@ pipeline {
             }
         }
 
-        stage('Run Naukri Automation') {
+        stage('Inspect Naukri Automation') {
             steps {
                 bat '''
                     cd /d D:\\naukri-automation
                     py -3 scripts\\update_naukri.py
+                    if errorlevel 1 exit /b 1
                 '''
             }
         }
@@ -62,17 +58,11 @@ pipeline {
     post {
         always {
             archiveArtifacts(
-                artifacts: 'logs/**',
+                artifacts: 'D:/naukri-automation/logs/**',
                 allowEmptyArchive: true
             )
-        }
 
-        success {
-            echo 'Profile inspection completed.'
-        }
-
-        failure {
-            echo 'Automation failed. Check Console Output and logs.'
+            echo 'Review the archived logs and screenshots. If login or confirmation is required, complete it manually.'
         }
     }
 }
