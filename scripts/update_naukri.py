@@ -9,7 +9,9 @@ from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import TimeoutException
 
 
 # 1. Project directories
@@ -33,6 +35,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 IS_JENKINS = bool(os.getenv("JENKINS_HOME"))
+POST_LOGIN_SETTLE_SECONDS = 10
+
+# Enter credentials locally here. Do not commit real credentials.
+NAUKRI_USERNAME = "satyakisen21@gmail.com"
+NAUKRI_PASSWORD = "Satyaki@24"
 
 
 # 3. Read configuration
@@ -78,13 +85,14 @@ def open_profile(config):
         raise
 
 
-# 5. Inspect profile without modifying it
+# 5. Inspect profile
 def inspect_profile(driver):
     logger.info("Current URL: %s", driver.current_url)
     logger.info("Page title: %s", driver.title)
 
     logger.info(
-        "Profile page detected. Review and update it manually."
+        "Profile summary toggle completed and verified. "
+        "No resume upload or other profile fields were changed."
     )
 
     file_inputs = driver.find_elements(
@@ -103,36 +111,166 @@ def inspect_profile(driver):
     driver.save_screenshot(str(screenshot_path))
     logger.info("Screenshot saved: %s", screenshot_path)
 
-    logger.info(
-        "Inspection complete. No profile changes or uploads "
-        "were performed."
-    )
+    logger.info("Profile inspection complete.")
 
 
-def complete_manual_login(driver):
+def complete_login(driver):
     if "login" not in driver.current_url.lower():
         return
 
-    if IS_JENKINS:
+    username = NAUKRI_USERNAME
+    password = NAUKRI_PASSWORD
+    if not username or not password:
         raise RuntimeError(
-            "Naukri requires an interactive sign-in, which Jenkins "
-            "cannot complete. Run this script from a desktop "
-            "PowerShell session and sign in manually."
+            "Naukri login is required, but NAUKRI_USERNAME or "
+            "NAUKRI_PASSWORD is empty in update_naukri.py."
         )
 
-    logger.warning(
-        "Naukri login required. Sign in manually in Chrome."
+    wait = WebDriverWait(driver, 30)
+    try:
+        username_field = wait.until(
+            EC.presence_of_element_located(
+                (By.CSS_SELECTOR, 'input[placeholder="Enter Email ID / Username"]')
+            )
+        )
+        password_field = wait.until(
+            EC.presence_of_element_located(
+                (By.CSS_SELECTOR, 'input[placeholder="Enter Password"]')
+            )
+        )
+    except TimeoutException as exc:
+        raise RuntimeError(
+            "Could not locate Naukri's standard login fields; "
+            "the login page may have changed."
+        ) from exc
+
+    username_field.send_keys(username)
+    password_field.send_keys(password)
+    driver.find_element(
+        By.XPATH, "//button[normalize-space()='Login']"
+    ).click()
+
+    try:
+        wait.until(
+            lambda browser: "login" not in browser.current_url.lower()
+        )
+    except TimeoutException as exc:
+        raise RuntimeError(
+            "Naukri did not complete sign-in. Check the configured "
+            "credentials; the account may require additional "
+            "verification such as OTP or CAPTCHA."
+        ) from exc
+
+    logger.info("Naukri sign-in completed.")
+
+
+def toggle_terminal_period(text):
+    content = text.rstrip()
+    trailing_whitespace = text[len(content):]
+
+    if content.endswith("."):
+        return content[:-1] + trailing_whitespace, False
+
+    return content + "." + trailing_whitespace, True
+
+
+def toggle_profile_summary(driver):
+    wait = WebDriverWait(driver, 30)
+    summary_link = wait.until(
+        EC.element_to_be_clickable(
+            (
+                By.XPATH,
+                "//div[contains(@class, 'quickLink')]"
+                "//span[translate(normalize-space(.), "
+                "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
+                "'abcdefghijklmnopqrstuvwxyz')='profile summary']"
+            )
+        )
     )
-    input(
-        "Complete the Naukri sign-in in Chrome, then press ENTER "
-        "to continue..."
+    summary_link.click()
+
+    wait.until(
+        EC.invisibility_of_element_located(
+            (By.CSS_SELECTOR, ".success-message-container")
+        )
+    )
+    edit_button = wait.until(
+        EC.element_to_be_clickable(
+            (By.CSS_SELECTOR, '[aria-label="Edit profile summary"]')
+        )
+    )
+    edit_button.click()
+
+    summary_field = wait.until(
+        EC.visibility_of_element_located(
+            (By.ID, "profileSummaryTxt")
+        )
+    )
+    current_summary = summary_field.get_attribute("value") or ""
+    updated_summary, added_period = toggle_terminal_period(
+        current_summary
     )
 
-    if "login" in driver.current_url.lower():
+    max_length = summary_field.get_attribute("maxlength")
+    if max_length and len(updated_summary) > int(max_length):
         raise RuntimeError(
-            "Naukri is still showing its login page. Complete "
-            "the sign-in in Chrome and run the script again."
+            "Profile Summary is at its maximum length; "
+            "cannot append a full stop."
         )
+
+    summary_field.clear()
+    summary_field.send_keys(updated_summary)
+    if summary_field.get_attribute("value") != updated_summary:
+        raise RuntimeError(
+            "The Profile Summary field did not accept the requested "
+            "text; nothing was saved."
+        )
+
+    save_button = wait.until(
+        EC.element_to_be_clickable(
+            (By.XPATH, "//button[normalize-space()='Save']")
+        )
+    )
+    save_button.click()
+    try:
+        wait.until(
+            EC.invisibility_of_element_located(
+                (By.ID, "profileSummaryTxt")
+            )
+        )
+    except TimeoutException as exc:
+        raise RuntimeError(
+            "Naukri did not close the Profile Summary editor after "
+            "Save; the change may not have been saved."
+        ) from exc
+
+    wait.until(
+        EC.invisibility_of_element_located(
+            (By.CSS_SELECTOR, ".success-message-container")
+        )
+    )
+    edit_button = wait.until(
+        EC.element_to_be_clickable(
+            (By.CSS_SELECTOR, '[aria-label="Edit profile summary"]')
+        )
+    )
+    edit_button.click()
+    saved_field = wait.until(
+        EC.visibility_of_element_located(
+            (By.ID, "profileSummaryTxt")
+        )
+    )
+    if (saved_field.get_attribute("value") or "") != updated_summary:
+        raise RuntimeError(
+            "The saved Profile Summary did not match the requested "
+            "toggle; verify it in Naukri before the next run."
+        )
+
+    action = "added" if added_period else "removed"
+    logger.info(
+        "Profile Summary saved and verified; terminal full stop %s.",
+        action
+    )
 
 
 # 6. Main program
@@ -158,9 +296,22 @@ def main():
         )
 
         driver = open_profile(config)
-        time.sleep(3)
-
-        complete_manual_login(driver)
+        complete_login(driver)
+        if "/mnjuser/profile" not in driver.current_url.lower():
+            driver.get(config["profile_url"])
+            WebDriverWait(driver, 30).until(
+                lambda browser:
+                    "/mnjuser/profile" in browser.current_url.lower()
+                    and browser.execute_script(
+                        "return document.readyState"
+                    ) in ("interactive", "complete")
+            )
+        logger.info(
+            "Waiting %d seconds for Naukri page rendering.",
+            POST_LOGIN_SETTLE_SECONDS
+        )
+        time.sleep(POST_LOGIN_SETTLE_SECONDS)
+        toggle_profile_summary(driver)
         inspect_profile(driver)
 
         if IS_JENKINS:
