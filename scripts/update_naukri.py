@@ -38,8 +38,8 @@ IS_JENKINS = bool(os.getenv("JENKINS_HOME"))
 POST_LOGIN_SETTLE_SECONDS = 10
 
 # Enter credentials locally here. Do not commit real credentials.
-NAUKRI_USERNAME = "satyakisen21@gmail.com"
-NAUKRI_PASSWORD = "Satyaki@24"
+NAUKRI_USERNAME = os.getenv("NAUKRI_EMAIL", "").strip()
+NAUKRI_PASSWORD = os.getenv("NAUKRI_PASSWORD", "")
 
 
 # 3. Read configuration
@@ -311,7 +311,11 @@ def main():
             POST_LOGIN_SETTLE_SECONDS
         )
         time.sleep(POST_LOGIN_SETTLE_SECONDS)
+
+        #Automation: toggle the profile summary and verify it
         toggle_profile_summary(driver)
+
+        # Inspect the profile and take a screenshot for manual review
         inspect_profile(driver)
 
         if IS_JENKINS:
